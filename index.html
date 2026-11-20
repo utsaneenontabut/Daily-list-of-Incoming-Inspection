@@ -603,7 +603,7 @@ function defaultSession() {
 }
 function save() {
   try {
-    localStorage.setItem(LS, JSON.stringify({ cfg: S.cfg, roster: S.roster, lastQueue: S.lastQueue, lastSsl: S.lastSsl, history: S.history, backlog: S.backlog, log: S.log, daily: DB ? [] : S.daily }));
+    localStorage.setItem(LS, JSON.stringify({ cfg: S.cfg, roster: S.roster, lastQueue: S.lastQueue, lastSsl: S.lastSsl, history: S.history, backlog: S.backlog, log: S.log, daily: [] }));
   } catch (e) {}
   queueState();
 }
@@ -698,7 +698,10 @@ const idb = {
   async get(k) { const db = await this.open(); return new Promise((res, rej) => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); },
   async set(k, v) { const db = await this.open(); return new Promise((res, rej) => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = () => res(); t.onerror = () => rej(t.error); }); },
 };
-async function loadMaster() { try { const m = await idb.get('master'); if (m && m.pk) { S.master = m; S.master.typ = S.master.typ || {}; } } catch (e) {} }
+let _dyT = 0;
+function saveDailyIdb() { if (DB) return; clearTimeout(_dyT); _dyT = setTimeout(async () => { try { await idb.set('daily', S.daily); } catch (e) { toast('บันทึกรายการประจำวันในเครื่องไม่ได้ (พื้นที่เบราว์เซอร์เต็ม)', 6000); } }, 700); }
+async function loadDailyIdb() { if (DB) return; try { const d = await idb.get('daily'); if (Array.isArray(d) && d.length) { const m = new Map(S.daily.map(r => [r.id, r])); d.forEach(r => m.set(r.id, r)); S.daily = [...m.values()]; } } catch (e) {} }
+async function loadMaster() { await loadDailyIdb(); try { const m = await idb.get('master'); if (m && m.pk) { S.master = m; S.master.typ = S.master.typ || {}; } } catch (e) {} }
 async function clearMpk() {
   if (!DB) return;
   for (const id of (S._mpkIds || [])) { try { await DB.collection('mpk').doc(id).delete(); } catch (e) {} }
@@ -801,7 +804,7 @@ async function importHandoff(file) {
     if (st.cfg) Object.assign(S.cfg, st.cfg);
     if (st.roster && st.roster.length) S.roster = st.roster.map(p => Object.assign(newPerson(p.name), p, { df: mdf(p.df) }));
     S.lastQueue = st.lastQueue || ''; S.lastSsl = st.lastSsl || ''; if (st.history) S.history = st.history; S.backlog = st.backlog || []; if (st.log) S.log = st.log;
-    const byId = new Map(S.daily.map(r => [r.id, r])); (o.daily || []).forEach(r => byId.set(r.id, r)); S.daily = [...byId.values()];
+    const byId = new Map(S.daily.map(r => [r.id, r])); (o.daily || []).forEach(r => byId.set(r.id, r)); S.daily = [...byId.values()]; saveDailyIdb();
     if (DB) for (const r of (o.daily || [])) { try { await DB.collection('daily').doc(r.id).set(r); } catch (e) {} }
     S.backlog.forEach(it => Core.enrich(it, S.master));
     await saveMaster(); save(); rebuildPool(); render();
@@ -1422,7 +1425,7 @@ function queueGas() {
     _gasBusy = false;
   }, 1200);
 }
-async function gasDaily(recs) { if (!gasOn() || !recs.length) return; try { await gasCall({ action: 'daily', rows: recs }); } catch (e) { toast('บันทึกรายการประจำวันขึ้น Google Sheet ไม่สำเร็จ: ' + e.message, 6000); } }
+async function gasDaily(recs) { if (!gasOn() || !recs.length) return; try { for (let i = 0; i < recs.length; i += 800) await gasCall({ action: 'daily', rows: recs.slice(i, i + 800) }); } catch (e) { toast('บันทึกรายการประจำวันขึ้น Google Sheet ไม่สำเร็จ: ' + e.message, 6000); } }
 async function gasPull(silent) {
   if (!gasOn() || _gasBusy) return;
   try {
@@ -1442,7 +1445,7 @@ async function gasPull(silent) {
       try { if (kv.backlog) { S.backlog = JSON.parse(kv.backlog) || []; S.backlog.forEach(it => Core.enrich(it, S.master)); } } catch (e) {}
       _gasLast = JSON.stringify(gasPayload());
     }
-    if (Array.isArray(j.daily)) { S.daily = j.daily.map(o => Object.assign({}, o, { isNew: /^(true|y|yes|1|new)$/i.test(String(o.isNew || '')) })); S.history = [...new Set([...S.history, ...S.daily.map(r => r.batch).filter(Boolean)])]; }
+    if (Array.isArray(j.daily)) { S.daily = j.daily.map(o => Object.assign({}, o, { isNew: /^(true|y|yes|1|new)$/i.test(String(o.isNew || '')) })); S.history = [...new Set([...S.history, ...S.daily.map(r => r.batch).filter(Boolean)])]; saveDailyIdb(); }
     S.result = null; await saveMaster(true); try { localStorage.setItem(LS, JSON.stringify({ cfg: S.cfg, roster: S.roster, lastQueue: S.lastQueue, lastSsl: S.lastSsl, history: S.history, backlog: S.backlog, log: S.log, daily: [] })); } catch (e) {}
     S.pool.forEach(it => Core.enrich(it, S.master)); if (!S.imp) rebuildPool(); safeRender();
     if (!silent) toast(`ดึงจาก Google Sheet แล้ว: ผู้ตรวจ ${S.roster.length} คน · ผู้ปล่อย ${Object.keys(S.master.mrp).length} MRP · รายการประจำวัน ${S.daily.length}`, 5000);
@@ -1521,14 +1524,14 @@ async function putDaily(recs) {
   let bad = 0; const ids = new Set(recs.map(r => r.id));
   if (DB) { for (const r of recs) { try { await DB.collection('daily').doc(r.id).set(r); } catch (e) { bad++; } } }
   S.daily = S.daily.filter(r => !ids.has(r.id)).concat(recs);
-  if (!DB) { save(); gasDaily(recs); }
+  if (!DB) { save(); saveDailyIdb(); gasDaily(recs); }
   return bad;
 }
 async function delDaily(recs) {
   let bad = 0; const ids = new Set(recs.map(r => r.id));
   if (DB) { for (const r of recs) { try { await DB.collection('daily').doc(r.id).delete(); } catch (e) { bad++; } } }
   S.daily = S.daily.filter(r => !ids.has(r.id));
-  if (!DB) { save(); if (gasOn()) gasCall({ action: 'dailyDel', ids: [...ids] }).catch(() => {}); }
+  if (!DB) { save(); saveDailyIdb(); if (gasOn()) gasCall({ action: 'dailyDel', ids: [...ids] }).catch(() => {}); }
   return bad;
 }
 function rerenderDaily() {
@@ -1573,36 +1576,41 @@ async function dyExport(rows, label) {
 }
 const hkNorm = c => String(c ?? '').toLowerCase().replace(/[^a-z0-9\u0e00-\u0e7f]/g, '');
 const HRULES = [[/^วันที่ตรวจสอบ|^วันที่$|^date$/, 'date'], [/^เช้า|^รอบ|^half/, 'half'], [/^build/, 'build'], [/^batch/, 'batch'], [/^created|วันรับเข้า/, 'created'],
-  [/^phased?(appear|app)/, 'pa'], [/^phased?dim/, 'pd'], [/^phased?func/, 'pf'], [/^pkcodeold|^oldcode/, 'old'], [/^pkcode|^pk$|^material$/, 'pk'], [/^name$/, 'name'], [/^typepk|^type$/, 'type'],
-  [/^po$/, 'po'], [/^qty/, 'qty'], [/^pack/, 'pack'], [/^vendorname/, 'vname'], [/^vendorno|^vendornumber/, 'vno'], [/^halal/, 'halal'], [/^cntry|^country|^vendorcountry/, 'country'],
+  [/^phased?(appear|app)/, 'pa'], [/^phased?di/, 'pd'], [/^phased?func/, 'pf'], [/^pkcodeold|^oldcode/, 'old'], [/^pkcode|^pk$|^material$/, 'pk'], [/^name$/, 'name'], [/^typepk|^type$/, 'type'],
+  [/^po$/, 'po'], [/^qty/, 'qty'], [/^pack/, 'pack'], [/^vendorname/, 'vname'], [/^vendorno|^vendornumber|^vendor$|^vendorcode/, 'vno'], [/^halal/, 'halal'], [/^cntry|^country|^vendorcountry/, 'country'],
   [/^new/, 'isNew'], [/^เร่ง/, 'urgent'], [/^longterm/, 'lt'], [/^approved|^ผู้ปล่อย/, 'approver'], [/^appearance|ผู้ตรวจappearance/, 'app'], [/^dimension/, 'dim'], [/^function/, 'fun'],
-  [/^remark/, 'remark'], [/^mrp$/, 'mrp'], [/^tag$/, 'tag'], [/^status/, 'status']];
+  [/^remark/, 'remark'], [/^mrp$/, 'mrp'], [/^tag$/, 'tag'], [/^status$/, 'status']];
 const hkOf = c => { const n = hkNorm(c); if (!n) return ''; const r = HRULES.find(([re]) => re.test(n)); return r ? r[1] : (HMAP[normH(c)] || ''); };
 async function importDaily(file) {
   if (!window.XLSX) { toast('ยังโหลดตัวอ่านไฟล์ Excel ไม่ได้'); return; }
   try {
-    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' }), recs = []; let bad = 0;
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' }), recs = [], occ = {}; let bad = 0, diag = '';
     for (const sn of wb.SheetNames) {
       const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: true, defval: '' });
       const hi = rows.findIndex(r => r.some(c => hkOf(c) === 'batch')); if (hi < 0) continue;
       const sub = rows[hi + 1] || [], two = rows[hi].some(c => /^phased?$/.test(hkNorm(c))) && sub.some(c => /appear|dim|func/i.test(String(c)));
       const cols = rows[hi].map((c, i) => hkOf(two && /^phased?$/.test(hkNorm(c)) ? 'Phased ' + sub[i] : (c === '' && two && i > 0 && /^phased?$/.test(hkNorm(rows[hi][i - 1])) ? 'Phased ' + sub[i] : c)));
+      const FB = { created: 4, pa: 5, pd: 6, pf: 7, vno: 15, country: 17 };
+      Object.keys(FB).forEach(k => { if (!cols.includes(k) && cols[FB[k]] === '') cols[FB[k]] = k; });
+      const L = i => (i < 26 ? String.fromCharCode(65 + i) : 'A' + String.fromCharCode(39 + i));
+      diag = ['created', 'pa', 'pd', 'pf', 'pk', 'vno', 'country', 'half', 'date'].map(k => `${k}=${cols.includes(k) ? L(cols.indexOf(k)) : '-'}`).join(' ');
       for (const r of rows.slice(hi + 1 + (two ? 1 : 0))) {
         const o = {}; cols.forEach((k, i) => { if (k && o[k] === undefined) o[k] = r[i]; });
         if (!Object.values(o).some(v => String(v).trim())) continue;
         const batch = String(o.batch ?? '').trim(), date = toIsoDate(o.date) || toIsoDate(o.created);
         if (!batch || !date) { bad++; continue; }
-        recs.push(dyFromObj(o, batch, date));
+        const rec = dyFromObj(o, batch, date); occ[batch] = (occ[batch] || 0) + 1; rec._n = occ[batch]; recs.push(rec);
       }
     }
     if (!recs.length) { toast('ไม่พบรายการในไฟล์ (ต้องมีหัวคอลัมน์ Batch และ วันที่)'); return; }
+    recs.forEach(r => { if (occ[r.batch] > 1) r.id = dyId(r.batch) + '_' + r._n; delete r._n; });
     toast(`กำลังนำเข้า ${recs.length} รายการ…`);
     const fail = await putDaily(recs);
     S._vl = -1; fillVendors(S.pool);
     const nm = await learnRows(recs.map(r => ({ pk: r.pk, mrp: r.mrp, ap: r.approver, typ: r.type, old: r.old, halal: r.halal, ...(r.isNew ? {} : { a: r.pa, d: r.pd, f: r.pf }) })), true);
     S.dyYear = recs.map(r => r.date).sort().pop().slice(0, 4);
     rerenderDaily();
-    toast(`นำเข้า ${recs.length - fail} รายการ${nm ? ` · อัปเดต Master ${nm} PK` : ''}${bad ? ` · ข้าม ${bad} แถวที่ไม่มี Batch/วันที่` : ''}${fail ? ` · บันทึกไม่สำเร็จ ${fail}` : ''}`);
+    toast(`นำเข้า ${recs.length - fail} รายการ (คอลัมน์ที่อ่านได้: ${diag})${nm ? ` · อัปเดต Master ${nm} PK` : ''}${bad ? ` · ข้าม ${bad} แถวที่ไม่มี Batch/วันที่` : ''}${fail ? ` · บันทึกไม่สำเร็จ ${fail}` : ''}`);
   } catch (e) { toast('อ่านไฟล์ไม่ได้: ' + e.message); }
 }
 async function dyEdit(id, field, val) {
