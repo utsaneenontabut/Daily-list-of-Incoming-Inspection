@@ -1009,7 +1009,8 @@ const gridHead = (key, cols) => {
 };
 const gridRow = (cols, it, i) => cols.map(c => {
   if (c.fz) return `<td class="${((c.cls || '') + ' fz' + (c._last ? ' lastfz' : '') + (c.tc ? ' ' + c.tc(it) : '')).trim()}"${fzSty(c)}>${c.ri ? c.ri(it, i) : esc(c.v(it))}</td>`;
-  return c.r ? c.r(it, i) : `<td class="${c.cls || ''}">${esc(c.v(it))}</td>`;
+  if (c.r) return c.r(it, i);
+  return `<td class="${((c.cls || '') + (c.tc ? ' ' + c.tc(it) : '')).trim()}">${c.ri ? c.ri(it, i) : esc(c.v(it))}</td>`;
 }).join('');
 
 /* ---------------- 1 นำเข้า ---------------- */
