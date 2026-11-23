@@ -968,10 +968,12 @@ const findItem = id => [...(S.imp ? [...S.imp.keep, ...S.imp.dup, ...S.imp.pt] :
 const FZW = { created: 96, half: 64, batch: 108, mvt: 70, pk: 124, name: 210, type: 120, st: 100 };
 const FZORD = ['st', 'sd', 'created', 'batch', 'mvt', 'pk', 'old', 'name', 'type'], FZREG = [];
 const FZOPT = [['none', 'ไม่ตรึง'], ['created', 'ถึง Created date'], ['batch', 'ถึง Batch'], ['mvt', 'ถึง Movement'], ['pk', 'ถึง PK Code'], ['old', 'ถึง Old code'], ['name', 'ถึง Name'], ['type', 'ถึง Type PK']];
+const FZDYOPT = [['none', 'ไม่ตรึง'], ['half', 'ถึง รอบ'], ['batch', 'ถึง Batch'], ['created', 'ถึง Created date'], ['pk', 'ถึง PK code'], ['name', 'ถึง Name']];
+const fzSelect = (key, opts, def) => `<label class="small muted">ตรึงคอลัมน์ <select data-fzto="${key}" aria-label="ตรึงคอลัมน์ซ้าย">${opts.map(([k, t]) => `<option value="${k}" ${(S[key] || def) === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label>`;
 function layoutFz(cols, dyn) {
   if (dyn) { if (!FZREG.includes(cols)) FZREG.push(cols); cols.forEach(c => { if (c.fzc === undefined) c.fzc = !!c.fz; });
-    let to = 'pk'; try { to = S.fzTo || 'pk'; } catch (e) {} const lim = to === 'none' ? -1 : FZORD.indexOf(to);
-    cols.forEach(c => { c.fz = !!c.fzc && (c.k === 'ksel' || (FZORD.indexOf(c.k) >= 0 && FZORD.indexOf(c.k) <= lim)); c._last = false; }); }
+    const key = cols.fzKey || 'fzTo', ord = cols.fzOrd || FZORD; let to = cols.fzDef || 'pk'; try { to = S[key] || to; } catch (e) {} const lim = to === 'none' ? -1 : ord.indexOf(to);
+    cols.forEach(c => { c.fz = !!c.fzc && (c.k === 'ksel' || c.k === 'sel' || (ord.indexOf(c.k) >= 0 && ord.indexOf(c.k) <= lim)); c._last = false; }); }
   let left = 0; const fz = cols.filter(c => c.fz);
   fz.forEach(c => { c._l = left; c._w = c.fw || FZW[c.k] || 110; left += c._w; });
   if (fz.length) fz[fz.length - 1]._last = true;
@@ -1051,7 +1053,7 @@ function vImport() {
     <div class="seg">${tabs.map(([k, t, n]) => `<button data-itab="${k}" aria-pressed="${cur === k}">${t}<b>${n}</b></button>`).join('')}</div>
     <span class="sp"></span>
     <span class="muted small">ทั้งหมดในไฟล์ ${i.total} · เข้ารอบนี้ ${S.pool.length}</span>
-    <label class="small muted">ตรึงคอลัมน์ <select data-fzto aria-label="ตรึงคอลัมน์ซ้าย">${FZOPT.map(([k, t]) => `<option value="${k}" ${(S.fzTo || 'pk') === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+    ${fzSelect('fzTo', FZOPT, 'pk')}
     <button class="btn danger" data-act="clearImport">ล้างข้อมูลที่นำเข้า</button>
   </div>
   ${cur === 'keep' ? vCheck() : `${fbarHtml('im')}${typeDl()}<div class="tw"><table><thead>${gridHead('im', imCols)}</thead><tbody id="imBody">${imRows()}</tbody></table></div>`}`;
@@ -1278,6 +1280,7 @@ function resToolbar() {
   <div class="toolbar">
     <div class="seg"><button data-rmode="person" aria-pressed="${S.resMode === 'person'}">รายคน</button><button data-rmode="table" aria-pressed="${S.resMode === 'table'}">ตารางรวม / แก้ไข</button></div>
     <span class="sp"></span>
+    ${S.resMode === 'table' || S.fRes ? fzSelect('fzTo', FZOPT, 'pk') : ''}
     <label class="small muted">เลือกคน <select id="dlWho">${names.map(x => `<option ${x === who ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></label>
     <button class="btn primary" data-act="dlOne">ใบเป้าหมายรายคน (.xlsx)</button>
     <button class="btn" data-act="dlAll">ใบเป้าหมายทุกคน (.xlsx ไฟล์เดียว แยกแท็บรายคน)</button>
@@ -1488,14 +1491,15 @@ const dyCols = layoutFz([
   Object.assign(dc('date', 'วันที่ตรวจสอบ', r => Core.dmy(r.date)), { fz: true, fw: 104 }),
   Object.assign(dc('half', 'รอบ', r => r.half), { fz: true, fw: 64 }),
   Object.assign(dc('batch', 'Batch', r => r.batch, 'mono'), { fz: true }),
-  dc('created', 'Created date', r => (r.created ? Core.dmy(r.created) : '')),
+  Object.assign(dc('created', 'Created date', r => (r.created ? Core.dmy(r.created) : '')), { fz: true, fw: 100 }),
   dc('pa', 'Phased Appearance', r => r.pa), dc('pd', 'Phased Dimension', r => r.pd), dc('pf', 'Phased Function', r => r.pf),
-  dc('pk', 'PK code', r => r.pk, 'mono'), dc('old', 'Old code', r => r.old, 'mono'), dc('name', 'Name', r => r.name, 'nm'),
+  Object.assign(dc('pk', 'PK code', r => r.pk, 'mono'), { fz: true, fw: 130 }), dc('old', 'Old code', r => r.old, 'mono'), Object.assign(dc('name', 'Name', r => r.name, 'nm'), { fz: true, fw: 220 }),
   dc('po', 'PO', r => r.po, 'mono'), dc('qty', 'QTY', r => r.qty, 'mono'), dc('pack', 'Pack Size', r => r.pack), dc('vname', 'Vendor Name', r => r.vname), dc('vno', 'Vendor NO', r => r.vno, 'mono'),
   dc('halal', 'Halal', r => r.halal), dc('country', 'Cntry/Reg of Origin', r => r.country), dc('new', 'New', r => (r.isNew ? 'New' : '-')), dc('urgent', 'เร่ง', r => r.urgent), dc('lt', 'Long-Term Char', r => r.lt),
   dyEditCol('app', 'Appearance ผู้ตรวจ'), dyEditCol('dim', 'Dimension ผู้ตรวจ'), dyEditCol('fun', 'Function ผู้ตรวจ'),
   dc('ap', 'Approved ผู้ปล่อย', r => r.approver), dc('remark', 'Remark', r => r.remark), dc('mrp', 'MRP', r => r.mrp, 'mono'),
   Object.assign(dc('del', '', () => ''), { nf: true, r: r => `<td><button class="btn sm danger" data-act="dyDel" data-id="${esc(r.id)}" aria-label="ลบ ${esc(r.batch)}">ลบ</button></td>` })]);
+dyCols.fzKey = 'fzDy'; dyCols.fzOrd = ['month', 'date', 'half', 'batch', 'created', 'pk', 'name']; dyCols.fzDef = 'batch'; layoutFz(dyCols, true);
 document.addEventListener('toggle', e => { const t = e.target; if (t.dataset && t.dataset.fold) { S.fold = S.fold || {}; S.fold[t.dataset.fold] = t.open; uiSave(); } }, true);
 const dyList = () => {
   const key = r => r.date + (r.half === 'บ่าย' ? '1' : '0'), dir = S.dySort === 'asc' ? 1 : -1;
@@ -1584,7 +1588,7 @@ function dyTools() {
     <label class="btn sm" for="fDaily">นำเข้าไฟล์รายการประจำวัน (.xlsx / .csv)</label><input type="file" id="fDaily" accept=".xlsx,.xls,.csv" hidden>
     <button class="btn sm" data-act="dyExp">Export ปี ${esc(yr)} (${nYear})</button>${fl ? `<button class="btn sm" data-act="dyExpF">Export ที่กรองอยู่ (${nF})</button>` : ''}
     ${S.dyUndo && S.dyUndo.length ? `<button class="btn sm" data-act="dyUndo">เลิกทำการลบล่าสุด (${S.dyUndo.length})</button>` : ''}
-    <span class="sp"></span>${clr}</div>${add}`;
+    <span class="sp"></span>${fzSelect('fzDy', FZDYOPT, 'batch')}${clr}</div>${add}`;
 }
 async function dyExport(rows, label) {
   if (!window.XLSX) { toast('ยังโหลดตัวสร้างไฟล์ Excel ไม่ได้'); return; }
@@ -1727,8 +1731,8 @@ function vMaster() {
 /* ---------------- render ---------------- */
 const TABS = [['master', '1 ข้อมูลหลัก'], ['import', '2 นำเข้าและตรวจข้อมูล'], ['people', '3 ผู้ตรวจและเงื่อนไข'], ['result', '4 ผลการแจก'], ['daily', 'รายการตรวจสอบประจำวัน']];
 const UIK = 'dl_ui_v1';
-const uiLoad = () => { try { const o = JSON.parse(localStorage.getItem(UIK) || '{}'); if (o.fzTo) S.fzTo = o.fzTo; S.fold = Object.assign({}, o.fold || {}); } catch (e) { S.fold = {}; } };
-const uiSave = () => { try { localStorage.setItem(UIK, JSON.stringify({ fzTo: S.fzTo || 'pk', fold: S.fold || {} })); } catch (e) {} };
+const uiLoad = () => { try { const o = JSON.parse(localStorage.getItem(UIK) || '{}'); if (o.fzTo) S.fzTo = o.fzTo; if (o.fzDy) S.fzDy = o.fzDy; S.fold = Object.assign({}, o.fold || {}); } catch (e) { S.fold = {}; } };
+const uiSave = () => { try { localStorage.setItem(UIK, JSON.stringify({ fzTo: S.fzTo || 'pk', fzDy: S.fzDy || 'batch', fold: S.fold || {} })); } catch (e) {} };
 function render() {
   FZREG.forEach(c => layoutFz(c, true));
   $('#sDate').value = S.date; $('#sHalf').value = S.half;
@@ -1897,6 +1901,7 @@ async function dlAll() {
   const names = personNames(); if (!names.length) { toast('ยังไม่มีรายการที่แจก'); return; }
   await saveFile(`ใบเป้าหมายทุกคน_${dateTag()}.xlsx`, await bookBuf(names));
 }
+const isoD = v => { const m = /^(\d{4})-(\d\d)-(\d\d)/.exec(String(v || '')); return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])) : ''; };
 async function dlTotal() {
   const R = S.result; if (!R) return;
   const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('Total');
@@ -1905,9 +1910,10 @@ async function dlTotal() {
   const ord = x => ({ assigned: 0, approver: 1, ssl: 2, carry: 3 })[x.status] ?? 4;
   [...R.items].filter(x => ord(x) < 4).sort((a, b) => ord(a) - ord(b)).forEach(x => {
     const carry = x.status === 'carry' || x.status === 'ssl';
-    ws.addRow([x.build, x.batch, x.created ? Core.dmy(x.created) : '', x.pA.raw, x.pD.raw, x.pF.raw, x.pk, x.oldCode, x.name, x.po, x.qty, x.pack, x.vname, x.vno,
-      x.halal, x.country, x.newTxt, x.urgent, x.lt, carry ? 'ค้าง' : x.app, carry ? '' : x.dim, carry ? '' : x.fun, x.approver, x.remark, x.mrp, Core.dmy(S.date), S.half]);
+    ws.addRow([x.build, x.batch, isoD(x.created), x.pA.raw, x.pD.raw, x.pF.raw, x.pk, x.oldCode, x.name, x.po, x.qty, x.pack, x.vname, x.vno,
+      x.halal, x.country, x.newTxt, x.urgent, x.lt, carry ? 'ค้าง' : x.app, carry ? '' : x.dim, carry ? '' : x.fun, x.approver, x.remark, x.mrp, isoD(S.date), S.half]);
   });
+  [3, 26].forEach(c => { ws.getColumn(c).numFmt = 'dd/mm/yyyy'; ws.getColumn(c).alignment = { horizontal: 'right' }; });
   heads.forEach((h, i) => { ws.getColumn(i + 1).width = [8, 13, 12, 10, 10, 10, 14, 12, 38, 12, 9, 22, 26, 10, 8, 8, 7, 8, 8, 12, 12, 12, 12, 18, 7, 12, 8][i]; });
   await saveFile(`ข้อมูลสำหรับลงไฟล์รายการตรวจสอบประจำวัน_${dateTag()}.xlsx`, await wb.xlsx.writeBuffer());
 }
@@ -1990,7 +1996,7 @@ document.addEventListener('input', e => {
 document.addEventListener('toggle', e => { if (e.target.id === 'statsBox') S.openStats = e.target.open; }, true);
 document.addEventListener('change', e => {
   const t = e.target, d = t.dataset;
-  if (t.matches && t.matches('[data-fzto]')) { S.fzTo = t.value; uiSave(); render(); return; }
+  if (t.matches && t.matches('[data-fzto]')) { S[t.dataset.fzto] = t.value; uiSave(); render(); return; }
   if (t.id === 'sDate') { S.date = t.value; S.result = null; if (S.tab !== 'import') render(); save(); return; }
   if (t.id === 'sHalf') { S.half = t.value; S.result = null; if (S.tab !== 'import') render(); save(); return; }
   if (t.id === 'dyPerson') { S.dyPerson = t.value; rerenderDaily(); return; }
